@@ -3,7 +3,7 @@ spring:
     name: acik-arttirma-backend
 
   datasource:
-    url: ${DB_URL:jdbc:postgresql://localhost:5432/auction}
+    url: ${DB_URL:jdbc:postgresql://localhost:5433/auction}
     username: ${DB_USER:auction}
     password: ${DB_PASSWORD:auction}
 
