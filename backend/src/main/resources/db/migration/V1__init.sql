@@ -1,0 +1,3 @@
+-- V1__init.sql
+-- Şema veritabanı sorumlusu tarafından yazılacak (F2).
+-- Bu dosya F1'de sadece Flyway'in çalıştığını doğrulamak için boş bırakıldı.

@@ -1,11 +1,33 @@
-# Açık Arttırma Oyunu (v1.1)
+# AÃ§Ä±k ArttÄ±rma Oyunu
 
-3 kişilik, gerçek zamanlı, konsept tabanlı açık arttırma ve kadro kurma oyunu.
+3 oyunculu, canlÄ± aÃ§Ä±k arttÄ±rmayla 11 kiÅŸilik futbol kadrosu kurulan oyun.
 
-## Proje Yapısı
-- backend/: Spring Boot & WebSocket (STOMP) backend servisi
-- frontend/: Web istemcisi
-- docs/: Proje dokümanı, ERD ve WebSocket olay sözleşmeleri
+## KlasÃ¶r yapÄ±sÄ±
 
-## Başlangıç
+| KlasÃ¶r | Ä°Ã§erik |
+| --- | --- |
+| `backend/` | Spring Boot (Java 21, Maven) sunucusu |
+| `frontend/` | Ä°stemci |
+| `docs/` | Kararlar, olay sÃ¶zleÅŸmesi, ÅŸema notlarÄ± |
+| `docker-compose.yml` | Yerel PostgreSQL 16 |
+
+## Backend'i Ã§alÄ±ÅŸtÄ±rma
+
+```bash
+# 1) VeritabanÄ±nÄ± baÅŸlat
 docker compose up -d
+
+# 2) UygulamayÄ± baÅŸlat
+cd backend
+mvn spring-boot:run
+```
+
+- Swagger UI: http://localhost:8080/swagger-ui.html
+- VeritabanÄ±: `localhost:5432`, db/kullanÄ±cÄ±/ÅŸifre: `auction` (`.env` ile deÄŸiÅŸtirilebilir)
+
+Gereksinimler: JDK 21, Maven 3.9+, Docker.
+
+## Git kurallarÄ±
+
+- `main` korumalÄ±: PR + 1 onay, squash merge
+- Dal adlarÄ±: `feature/`, `fix/`, `docs/`, `db/`, `chore/`

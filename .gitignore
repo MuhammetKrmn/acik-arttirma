@@ -1,28 +1,28 @@
-# IDE ve Editör Dosyalarý
+# Maven / Java
+target/
+*.class
+*.log
+hs_err_pid*
+
+# IDE
 .idea/
-.vscode/
 *.iml
-*.iws
-*.ipr
+.vscode/
+.classpath
+.project
+.settings/
+
+# OS
 .DS_Store
+Thumbs.db
 
-# Backend (Java / Spring Boot / Maven / Gradle)
-backend/target/
-backend/build/
-backend/.gradle/
-backend/*.out
-backend/log/
-
-# Frontend (Node / React / Vue vb.)
-frontend/node_modules/
-frontend/dist/
-frontend/build/
-frontend/.next/
-frontend/.cache/
-
-# Çevre Deðiþkenleri & Þifreler
-*.env
+# Ortam deÄŸiÅŸkenleri / gizli dosyalar
+.env
 *.env.local
 
-# Docker & Geçici Dosyalar
-*.log
+# Docker volume verileri
+pgdata/
+
+# Frontend (arkadaÅŸÄ±n ekleyebilir)
+node_modules/
+dist/

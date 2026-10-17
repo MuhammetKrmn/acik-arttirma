@@ -1,13 +1,12 @@
-package com.oyun.acikartirma;
+package com.acikarttirma;
 
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 
 @SpringBootApplication
-public class BackendApplication {
+public class AcikArttirmaApplication {
 
     public static void main(String[] args) {
-        SpringApplication.run(BackendApplication.class, args);
+        SpringApplication.run(AcikArttirmaApplication.class, args);
     }
-
 }
