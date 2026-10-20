@@ -1,0 +1,5 @@
+# dev profili: şemaya ek olarak sahte geliştirme verisi (db/dev) yüklenir.
+# Çalıştırma: .\mvnw spring-boot:run "-Dspring-boot.run.profiles=dev"
+spring:
+  flyway:
+    locations: classpath:db/migration,classpath:db/dev
