@@ -1,0 +1,29 @@
+
+
+
+@import "tailwindcss";
+
+/* Tailwind v4'te butonlar varsayılan olarak "cursor: default" oluyor.
+   Eski (v3) davranışı geri getiriyoruz. */
+button:not(:disabled),
+[role="button"]:not(:disabled) {
+  cursor: pointer;
+}
+
+/* animate-fade-in: MainMenu, Lobby ve DraftArena'da kullanılıyor */
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.animate-fade-in {
+  animation: fade-in 0.4s ease-out both;
+}
+
+/* Konuşma balonu: açılır, bekler, silinir */
+@keyframes chat-bubble {
+  0%   { opacity: 0; transform: translateY(8px) scale(0.85); }
+  8%   { opacity: 1; transform: translateY(0) scale(1); }
+  88%  { opacity: 1; transform: translateY(0) scale(1); }
+  100% { opacity: 0; transform: translateY(-4px) scale(0.98); }
+}
