@@ -17,15 +17,33 @@
 # 1) Veritabanını başlat
 docker compose up -d
 
-# 2) Uygulamayı başlat
+# 2) Uygulamayı başlat (dev profili: sahte test verisiyle)
 cd backend
-mvn spring-boot:run
+./mvnw spring-boot:run "-Dspring-boot.run.profiles=dev"
 ```
 
-- Swagger UI: http://localhost:8080/swagger-ui.html
-- Veritabanı: `localhost:5432`, db/kullanıcı/şifre: `auction` (`.env` ile değiştirilebilir)
+Windows PowerShell/cmd'de `./mvnw` yerine `.\mvnw` yazılır.
 
-Gereksinimler: JDK 21, Maven 3.9+, Docker.
+- Swagger UI: http://localhost:8080/swagger-ui.html
+- Veritabanı: `localhost:5433` (yerel PostgreSQL ile çakışmasın diye 5433), db/kullanıcı/şifre: `auction`
+- Şemayı sıfırdan kurmak için: `docker compose down -v` sonra `docker compose up -d`
+
+## Testler
+
+Kural motoru testleri (engine) Docker gerektirmez. Veritabanı testi için Docker'daki PostgreSQL açık olmalıdır.
+
+```bash
+cd backend
+./mvnw test
+```
+
+## Dev verisi
+
+`dev` profili şemaya ek olarak `db/dev/V900__dev_seed.sql` dosyasını yükler:
+1 sahte konsept ve her mevki ve tier için 4 kart. Her mevki için 1 U19 ceza kartı (reyting 50) ise `V2__penalty_cards.sql` ile gelir.
+Gerçek konsept/futbolcu verisi veritabanı sorumlusu tarafından ayrıca girilir.
+
+Gereksinimler: JDK 21, Docker.
 
 ## Git kuralları
 
