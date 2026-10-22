@@ -16,8 +16,8 @@ import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
 
 /**
- * Bir konsept + mevki + tier havuzundaki kart. U19 ceza kartında concept ve footballer null,
- * starting_price 0'dır (penaltyCard = true).
+ * Bir konsept + mevki + tier havuzundaki kart. U19 ceza kartı (penaltyCard = true) konsepte
+ * özel bir havuzdandır: tier null, starting_price 0, concept ve footballer dolu.
  *
  * <p>GİZLİLİK: overallRating oyun bitene kadar hiçbir REST/WebSocket cevabına konmaz.
  * Entity'ler istemciye doğrudan dönmez, her zaman ayrı DTO kullanılır.
@@ -47,7 +47,7 @@ public class Card {
     private Position position;
 
     @Convert(converter = TierConverter.class)
-    @Column(name = "tier", nullable = false)
+    @Column(name = "tier")
     private Tier tier;
 
     @Column(name = "overall_rating", nullable = false)

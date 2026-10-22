@@ -40,10 +40,7 @@ cd backend
 ## Dev verisi
 
 `dev` profili şemaya ek olarak `db/dev/V900__dev_seed.sql` dosyasını yükler:
-1 sahte konsept ve her mevki ve tier için 4 kart. Her mevki için 1 U19 ceza kartı (reyting 50) ise `V2__penalty_cards.sql` ile gelir.
-Gerçek konsept/futbolcu verisi veritabanı sorumlusu tarafından ayrıca girilir.
-
-Gereksinimler: JDK 21, Docker.
+1 sahte konsept, her mevki ve tier için 4 kart ve her mevki için 4 U19 ceza kartı. Gerçek konseptlerin U19 havuzu (konsept başına her mevkide en az 3 kart) V4 dosyasında gelir.
 
 ## Git kuralları
 

@@ -14,8 +14,9 @@ public interface CardRepository extends JpaRepository<Card, Long> {
     /** Konseptin ihale edilebilir tüm kartları (U19 hariç). */
     List<Card> findByConcept_IdAndPenaltyCardFalse(Long conceptId);
 
-    /** Tier 3'te bütçe yetmeyince verilecek U19 kartı (mevki başına tek kart). */
-    List<Card> findByPenaltyCardTrue();
-
-    List<Card> findByPositionAndPenaltyCardTrue(Position position);
+    /**
+     * Konseptin bir mevkideki U19 ceza havuzu. Tier 3 fiyatı karşılanamayınca buradan
+     * rastgele bir kart verilir.
+     */
+    List<Card> findByConcept_IdAndPositionAndPenaltyCardTrue(Long conceptId, Position position);
 }
