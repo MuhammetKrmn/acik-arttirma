@@ -1,6 +1,7 @@
 package com.acikarttirma.repository;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -28,8 +29,11 @@ import org.springframework.test.context.ActiveProfiles;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
- * F2 smoke testi: entity'ler şemayla uyuşuyor mu (ddl-auto=validate), dev seed doğru mu,
- * oda zinciri yazılıp okunabiliyor mu.
+ * F2 smoke testi: entity'ler şemayla uyuşuyor mu (ddl-auto=validate), seed ve gerçek veri
+ * kurallara uyuyor mu, oda zinciri yazılıp okunabiliyor mu.
+ *
+ * <p>Havuz ve fiyat kontrolleri kartı olan HER konsepte uygulanır (dev ve gerçek veri).
+ * Henüz kartı girilmemiş konseptler atlanır.
  *
  * <p>Docker'daki PostgreSQL açık olmalı (docker compose up -d). Her test sonunda geri alınır,
  * veritabanına kalıcı bir şey yazmaz. F7'de Testcontainers'a geçilecek.
@@ -57,44 +61,60 @@ class PersistenceSmokeTest {
         return conceptRepository.findByConceptName(DEV_CONCEPT).orElseThrow();
     }
 
+    /** Normal kartı girilmiş konseptler (boş konseptler atlanır). */
+    private List<Concept> conceptsWithCards() {
+        return conceptRepository.findAll().stream()
+                .filter(c -> !cardRepository.findByConcept_IdAndPenaltyCardFalse(c.getId()).isEmpty())
+                .toList();
+    }
+
     @Test
     void herMevkiVeTierHavuzundaEnAz3KartVar() {
-        Long conceptId = devConcept().getId();
-        for (Position position : Position.values()) {
-            for (Tier tier : Tier.values()) {
-                int count = cardRepository
-                        .findByConcept_IdAndPositionAndTierAndPenaltyCardFalse(conceptId, position, tier)
-                        .size();
-                assertTrue(count >= 3,
-                        position + " " + tier + " havuzunda en az 3 kart olmalı, bulunan: " + count);
+        for (Concept concept : conceptsWithCards()) {
+            for (Position position : Position.values()) {
+                for (Tier tier : Tier.values()) {
+                    int count = cardRepository
+                            .findByConcept_IdAndPositionAndTierAndPenaltyCardFalse(
+                                    concept.getId(), position, tier)
+                            .size();
+                    assertTrue(count >= 3, concept.getConceptName() + " " + position + " " + tier
+                            + " havuzunda en az 3 kart olmalı, bulunan: " + count);
+                }
             }
         }
     }
 
     @Test
-    void u19KartlariMevkiBasinaTekVeUcretsiz() {
-        List<Card> penalty = cardRepository.findByPenaltyCardTrue();
-        assertEquals(Position.values().length, penalty.size());
-        assertEquals(penalty.size(), penalty.stream().map(Card::getPosition).distinct().count());
-        for (Card card : penalty) {
-            assertEquals(0, card.getStartingPrice());
-            assertNull(card.getConcept());
-            assertNull(card.getFootballer());
+    void herKonseptinU19HavuzundaHerMevkideEnAz3KartVar() {
+        for (Concept concept : conceptsWithCards()) {
+            for (Position position : Position.values()) {
+                List<Card> pool = cardRepository
+                        .findByConcept_IdAndPositionAndPenaltyCardTrue(concept.getId(), position);
+                assertTrue(pool.size() >= 3, concept.getConceptName() + " " + position
+                        + " U19 havuzunda en az 3 kart olmalı, bulunan: " + pool.size());
+                for (Card card : pool) {
+                    assertEquals(0, card.getStartingPrice());
+                    assertNull(card.getTier());
+                    assertNotNull(card.getFootballer());
+                }
+            }
         }
     }
 
     @Test
     void tier3AcilisFiyatiKurali() {
-        List<Card> all = cardRepository.findByConcept_IdAndPenaltyCardFalse(devConcept().getId());
-        for (Card card : all) {
-            if (card.getTier() != Tier.T3) {
-                continue;
+        for (Concept concept : conceptsWithCards()) {
+            List<Card> all = cardRepository.findByConcept_IdAndPenaltyCardFalse(concept.getId());
+            for (Card card : all) {
+                if (card.getTier() != Tier.T3) {
+                    continue;
+                }
+                boolean attack = card.getPosition() == Position.LW
+                        || card.getPosition() == Position.ST
+                        || card.getPosition() == Position.RW;
+                assertEquals(attack ? 30 : 20, card.getStartingPrice(),
+                        concept.getConceptName() + " " + card.getPosition() + " tier 3 açılış fiyatı");
             }
-            boolean attack = card.getPosition() == Position.LW
-                    || card.getPosition() == Position.ST
-                    || card.getPosition() == Position.RW;
-            assertEquals(attack ? 30 : 20, card.getStartingPrice(),
-                    card.getPosition() + " tier 3 açılış fiyatı");
         }
     }
 
@@ -104,7 +124,8 @@ class PersistenceSmokeTest {
         Card stCard = cardRepository
                 .findByConcept_IdAndPositionAndTierAndPenaltyCardFalse(concept.getId(), Position.ST, Tier.T1)
                 .get(0);
-        Card u19Cb = cardRepository.findByPositionAndPenaltyCardTrue(Position.CB).get(0);
+        Card u19Cb = cardRepository
+                .findByConcept_IdAndPositionAndPenaltyCardTrue(concept.getId(), Position.CB).get(0);
 
         User user = userRepository.save(new User("smoke_" + UUID.randomUUID().toString().substring(0, 8)));
         Room room = roomRepository.save(new Room(concept, 1000, 42L));
