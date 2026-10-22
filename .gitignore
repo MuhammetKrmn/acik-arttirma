@@ -1,28 +1,24 @@
-# Maven / Java
-target/
-*.class
+# Logs
+logs
 *.log
-hs_err_pid*
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
 
-# IDE
-.idea/
-*.iml
-.vscode/
-.classpath
-.project
-.settings/
+node_modules
+dist
+dist-ssr
+*.local
 
-# OS
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
 .DS_Store
-Thumbs.db
-
-# Ortam değişkenleri / gizli dosyalar
-.env
-*.env.local
-
-# Docker volume verileri
-pgdata/
-
-# Frontend (arkadaşın ekleyebilir)
-node_modules/
-dist/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
