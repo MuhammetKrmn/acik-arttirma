@@ -42,6 +42,7 @@ cd backend
 `dev` profili şemaya ek olarak `db/dev/V900__dev_seed.sql` dosyasını yükler:
 1 sahte konsept, her mevki ve tier için 4 kart ve her mevki için 4 U19 ceza kartı. Gerçek konseptlerin U19 havuzu (konsept başına her mevkide en az 3 kart) V4 dosyasında gelir.
 
+Yeni bir migration (V5, V6...) içeren değişiklik çektikten sonra dev veritabanını sıfırla: docker compose down -v, ardından docker compose up -d. (V900 dev seed'i en son sürüm olduğu için yeni migration'lar sırasız görünür.)
 ## Git kuralları
 
 - `main` korumalı: PR + 1 onay, squash merge
