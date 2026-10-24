@@ -1,8 +1,10 @@
 package com.acikarttirma.dto;
 
+import com.acikarttirma.model.enums.AcquisitionType;
 import com.acikarttirma.model.enums.Position;
 import com.acikarttirma.model.enums.Slot;
 import com.acikarttirma.model.enums.Tier;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -48,5 +50,16 @@ public final class AuctionPayloads {
     }
 
     public record AuctionsFinished(Map<Long, Integer> budgets) {
+    }
+
+    /** player_disconnected / player_reconnected olaylarının içeriği. */
+    public record PlayerConnection(Long roomPlayerId) {
+    }
+
+    /** Tier 3 aşamasında bir oyuncunun bir slotuna ne verildi (T3 kartı veya U19), kaça. */
+    public record Tier3Entry(Long roomPlayerId, Slot slot, AcquisitionType type, int price, CardInfo card) {
+    }
+
+    public record Tier3Assigned(List<Tier3Entry> entries, Map<Long, Integer> budgets) {
     }
 }

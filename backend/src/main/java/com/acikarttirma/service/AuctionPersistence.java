@@ -1,5 +1,8 @@
 package com.acikarttirma.service;
 
+import com.acikarttirma.dto.AuctionPayloads;
+import com.acikarttirma.engine.Tier3Assignment;
+import com.acikarttirma.engine.U19Picker;
 import com.acikarttirma.exception.ApiException;
 import com.acikarttirma.model.AuctionItem;
 import com.acikarttirma.model.Card;
@@ -11,14 +14,22 @@ import com.acikarttirma.model.UserSquad;
 import com.acikarttirma.model.enums.AcquisitionType;
 import com.acikarttirma.model.enums.AuctionStatus;
 import com.acikarttirma.model.enums.RoomStatus;
+import com.acikarttirma.model.enums.Slot;
 import com.acikarttirma.model.enums.Tier;
 import com.acikarttirma.repository.AuctionItemRepository;
+import com.acikarttirma.repository.CardRepository;
 import com.acikarttirma.repository.RoomPlayerRepository;
 import com.acikarttirma.repository.RoomRepository;
 import com.acikarttirma.repository.SquadPlayerRepository;
 import com.acikarttirma.repository.UserSquadRepository;
 import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Random;
+import java.util.Set;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -35,17 +46,20 @@ public class AuctionPersistence {
     private final AuctionItemRepository auctionItemRepository;
     private final UserSquadRepository userSquadRepository;
     private final SquadPlayerRepository squadPlayerRepository;
+    private final CardRepository cardRepository;
 
     public AuctionPersistence(RoomRepository roomRepository,
                               RoomPlayerRepository roomPlayerRepository,
                               AuctionItemRepository auctionItemRepository,
                               UserSquadRepository userSquadRepository,
-                              SquadPlayerRepository squadPlayerRepository) {
+                              SquadPlayerRepository squadPlayerRepository,
+                              CardRepository cardRepository) {
         this.roomRepository = roomRepository;
         this.roomPlayerRepository = roomPlayerRepository;
         this.auctionItemRepository = auctionItemRepository;
         this.userSquadRepository = userSquadRepository;
         this.squadPlayerRepository = squadPlayerRepository;
+        this.cardRepository = cardRepository;
     }
 
     /** Odayı SETUP'tan AUCTION_ACTIVE'e geçirir, her oyuncuya boş kadro açar, oyun görüntüsünü döner. */
@@ -116,5 +130,85 @@ public class AuctionPersistence {
         squad.setTotalSpent(squad.getTotalSpent() + price);
         squadPlayerRepository.save(
                 new SquadPlayer(squad, item.getCard(), item.getSlot(), price, AcquisitionType.AUCTION));
+    }
+
+    /**
+     * Tier 3 aşaması. Motor (Tier3Assigner) kimin hangi slotu hangi fiyata aldığını zaten
+     * hesapladı; burada kartlar seçilip kadrolara yazılır, bütçeler düşer.
+     * TIER3_AUTO: slotun tier 3 kartı verilir. U19_PENALTY: konseptin o mevkideki U19 havuzundan
+     * rastgele kart, fiyat 0 (aynı futbolcu aynı kadroda tekrar etmez).
+     */
+    @Transactional
+    public List<AuctionPayloads.Tier3Entry> assignTier3(Long roomId, Map<Slot, List<Tier3Assignment>> bySlot) {
+        Room room = roomRepository.findByIdForUpdate(roomId)
+                .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "ROOM_NOT_FOUND", "Oda bulunamadı"));
+        room.setStatus(RoomStatus.TIER3_ASSIGN);
+        Random random = new Random(room.getSeed() * 31 + 17);
+
+        Map<Long, RoomPlayer> players = new HashMap<>();
+        Map<Long, UserSquad> squads = new HashMap<>();
+        Map<Long, Set<Long>> ownedFootballers = new HashMap<>();
+        for (RoomPlayer rp : roomPlayerRepository.findByRoom_IdOrderBySeatNumber(roomId)) {
+            players.put(rp.getId(), rp);
+            UserSquad squad = userSquadRepository.findByRoomPlayer_Id(rp.getId()).orElseThrow();
+            squads.put(rp.getId(), squad);
+            Set<Long> owned = new HashSet<>();
+            for (SquadPlayer sp : squadPlayerRepository.findBySquad_Id(squad.getId())) {
+                owned.add(sp.getCard().getFootballer().getId());
+            }
+            ownedFootballers.put(rp.getId(), owned);
+        }
+
+        Long conceptId = room.getConcept().getId();
+        Set<Long> usedU19Cards = new HashSet<>();
+        List<AuctionPayloads.Tier3Entry> entries = new ArrayList<>();
+
+        for (Slot slot : Slot.values()) {
+            List<Tier3Assignment> assignments = bySlot.get(slot);
+            if (assignments == null || assignments.isEmpty()) {
+                continue;
+            }
+            AuctionItem t3 = auctionItemRepository.findByRoom_IdAndSlotAndTier(roomId, slot, Tier.T3)
+                    .orElseThrow();
+            List<Card> u19Pool = cardRepository
+                    .findByConcept_IdAndPositionAndPenaltyCardTrue(conceptId, slot.getPosition()).stream()
+                    .sorted(Comparator.comparing(Card::getId))
+                    .toList();
+            boolean anyTier3 = false;
+            int tier3Price = 0;
+
+            for (Tier3Assignment a : assignments) {
+                RoomPlayer rp = players.get(a.playerId());
+                UserSquad squad = squads.get(a.playerId());
+                Set<Long> owned = ownedFootballers.get(a.playerId());
+                Card card;
+                if (a.type() == AcquisitionType.TIER3_AUTO) {
+                    card = t3.getCard();
+                    rp.setCurrentBudget(rp.getCurrentBudget() - a.price());
+                    squad.setTotalSpent(squad.getTotalSpent() + a.price());
+                    anyTier3 = true;
+                    tier3Price = a.price();
+                } else {
+                    List<U19Picker.Candidate> candidates = u19Pool.stream()
+                            .map(c -> new U19Picker.Candidate(c.getId(), c.getFootballer().getId()))
+                            .toList();
+                    U19Picker.Candidate chosen = U19Picker.pick(candidates, owned, usedU19Cards, random);
+                    card = u19Pool.stream().filter(c -> c.getId() == chosen.cardId()).findFirst().orElseThrow();
+                    usedU19Cards.add(card.getId());
+                }
+                owned.add(card.getFootballer().getId());
+                squadPlayerRepository.save(new SquadPlayer(squad, card, slot, a.price(), a.type()));
+                entries.add(new AuctionPayloads.Tier3Entry(rp.getId(), slot, a.type(), a.price(),
+                        new AuctionPayloads.CardInfo(card.getId(), card.getFootballer().getPlayerName(),
+                                card.getFootballer().getNationality(), card.getFootballer().getPhotoUrl(),
+                                card.getClub(), card.getPosition(), card.getStartingPrice())));
+            }
+            // Kimse tier 3 kartını almadıysa (hepsi U19) kart kullanılmamış sayılır.
+            t3.setStatus(anyTier3 ? AuctionStatus.AUTO_ASSIGNED : AuctionStatus.UNSOLD);
+            if (anyTier3) {
+                t3.setSoldPrice(tier3Price);
+            }
+        }
+        return entries;
     }
 }
