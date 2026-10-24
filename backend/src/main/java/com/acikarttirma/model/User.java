@@ -6,6 +6,7 @@ import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
+import java.util.UUID;
 import java.time.Instant;
 
 /** v1'de sadece misafir kullanıcılar var (email ve password_hash boş kalır). */
@@ -33,6 +34,9 @@ public class User {
     @Column(name = "created_at", nullable = false)
     private Instant createdAt = Instant.now();
 
+    @Column(name = "player_token", nullable = false, updatable = false, length = 36)
+    private String playerToken = UUID.randomUUID().toString();
+
     protected User() {
     }
 
@@ -50,4 +54,5 @@ public class User {
     public String getPasswordHash() { return passwordHash; }
     public void setPasswordHash(String passwordHash) { this.passwordHash = passwordHash; }
     public Instant getCreatedAt() { return createdAt; }
+    public String getPlayerToken() { return playerToken; }
 }
