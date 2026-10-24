@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="tr">
+<head>
+    <meta charset="utf-8">
+    <title>İhale test sayfası</title>
+    <style>
+        body { font-family: sans-serif; margin: 16px; max-width: 900px; }
+        input { padding: 4px; margin-right: 6px; }
+        button { padding: 4px 10px; margin: 2px; }
+        #state { margin: 12px 0; padding: 8px; background: #eef; }
+        #log { height: 320px; overflow: auto; background: #111; color: #ddd; padding: 8px; font: 12px monospace; white-space: pre-wrap; }
+    </style>
+</head>
+<body>
+<h3>İhale test sayfası</h3>
+<div>
+    <input id="token" size="40" placeholder="X-Player-Token">
+    <input id="room" size="6" placeholder="roomId">
+    <button onclick="connect()">Bağlan</button>
+    <button onclick="startGame()">Oyunu başlat</button>
+</div>
+<div>
+    <button onclick="bid(1)">+1</button>
+    <button onclick="bid(5)">+5</button>
+    <button onclick="bid(10)">+10</button>
+    <button onclick="withdraw()">Çekil</button>
+</div>
+<div id="state">Bağlı değil</div>
+<div id="log"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/@stomp/stompjs@7.0.0/bundles/stomp.umd.min.js"></script>
+<script>
+    let client = null;
+    let price = 0;
+    let deadline = 0;
+    let clockOffset = 0;
+    let info = '';
+
+    function log(text) {
+        const el = document.getElementById('log');
+        el.textContent += text + '\n';
+        el.scrollTop = el.scrollHeight;
+    }
+
+    function handle(event) {
+        const d = event.data;
+        if (event.type === 'auction_started') {
+            price = d.price; deadline = d.deadlineMs; clockOffset = d.serverNowMs - Date.now();
+            info = '#' + d.sequenceNo + ' ' + d.slot + ' ' + d.card.playerName + ' (' + d.card.club + ') başlangıç ' + d.price;
+        } else if (event.type === 'bid_accepted') {
+            price = d.price; deadline = d.deadlineMs; clockOffset = d.serverNowMs - Date.now();
+        } else if (event.type === 'bid_rejected') {
+            price = d.price;
+        } else if (event.type === 'auction_closed') {
+            deadline = 0; info = 'Kapandı: kazanan oyuncu ' + d.winnerRoomPlayerId + ', fiyat ' + d.price;
+        }
+        log(JSON.stringify(event));
+    }
+
+    function connect() {
+        const token = document.getElementById('token').value.trim();
+        const room = document.getElementById('room').value.trim();
+        client = new StompJs.Client({
+            brokerURL: 'ws://' + location.host + '/ws',
+            connectHeaders: { 'X-Player-Token': token },
+            reconnectDelay: 0,
+            onConnect: () => {
+                log('BAĞLANDI');
+                client.subscribe('/topic/rooms/' + room, m => handle(JSON.parse(m.body)));
+                client.subscribe('/user/queue/bids', m => handle(JSON.parse(m.body)));
+                client.subscribe('/user/queue/errors', m => log('HATA ' + m.body));
+            },
+            onStompError: f => log('STOMP HATASI: ' + f.headers['message']),
+            onWebSocketClose: () => log('Bağlantı kapandı')
+        });
+        client.activate();
+    }
+
+    function bid(increment) {
+        const room = document.getElementById('room').value.trim();
+        client.publish({
+            destination: '/app/rooms/' + room + '/bid',
+            body: JSON.stringify({ expectedPrice: price, increment: increment })
+        });
+    }
+
+    function withdraw() {
+        const room = document.getElementById('room').value.trim();
+        client.publish({ destination: '/app/rooms/' + room + '/withdraw' });
+    }
+
+    async function startGame() {
+        const token = document.getElementById('token').value.trim();
+        const room = document.getElementById('room').value.trim();
+        const res = await fetch('/api/rooms/' + room + '/start', { method: 'POST', headers: { 'X-Player-Token': token } });
+        log('START -> ' + res.status + ' ' + (res.ok ? '' : await res.text()));
+    }
+
+    setInterval(() => {
+        const el = document.getElementById('state');
+        if (!client) return;
+        const left = deadline ? Math.max(0, Math.round((deadline - (Date.now() + clockOffset)) / 100) / 10) : '-';
+        el.textContent = info + ' | güncel fiyat: ' + price + ' | kalan: ' + left + ' sn';
+    }, 100);
+</script>
+</body>
+</html>

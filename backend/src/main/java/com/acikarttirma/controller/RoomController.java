@@ -1,7 +1,9 @@
 package com.acikarttirma.controller;
 
 import com.acikarttirma.dto.CreateRoomRequest;
+import com.acikarttirma.dto.LiveStateView;
 import com.acikarttirma.dto.RoomView;
+import com.acikarttirma.service.AuctionOrchestrator;
 import com.acikarttirma.service.RoomService;
 import java.util.List;
 import org.springframework.http.HttpStatus;
@@ -21,9 +23,11 @@ public class RoomController {
     private static final String TOKEN_HEADER = "X-Player-Token";
 
     private final RoomService roomService;
+    private final AuctionOrchestrator auctionOrchestrator;
 
-    public RoomController(RoomService roomService) {
+    public RoomController(RoomService roomService, AuctionOrchestrator auctionOrchestrator) {
         this.roomService = roomService;
+        this.auctionOrchestrator = auctionOrchestrator;
     }
 
     @PostMapping
@@ -49,5 +53,19 @@ public class RoomController {
     @GetMapping
     public List<RoomView> listOpen() {
         return roomService.listOpenRooms();
+    }
+
+    /** SETUP durumundaki odayı başlatır. İlk ihale birkaç saniye sonra açılır. */
+    @PostMapping("/{roomId}/start")
+    @ResponseStatus(HttpStatus.ACCEPTED)
+    public void start(@RequestHeader(value = TOKEN_HEADER, required = false) String token,
+                      @PathVariable Long roomId) {
+        auctionOrchestrator.startGame(roomId, token);
+    }
+
+    /** Canlı oyunun anlık durumu (istemci kendini senkronlamak için). */
+    @GetMapping("/{roomId}/live")
+    public LiveStateView live(@PathVariable Long roomId) {
+        return auctionOrchestrator.getState(roomId);
     }
 }
