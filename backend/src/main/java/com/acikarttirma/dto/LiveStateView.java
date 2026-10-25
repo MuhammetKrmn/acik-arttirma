@@ -17,6 +17,6 @@ public record LiveStateView(
     }
 
     public record PlayerBudget(Long roomPlayerId, Long userId, int seatNumber, String username,
-                               int budget, List<Slot> filledSlots) {
+                               int budget, boolean connected, List<Slot> filledSlots) {
     }
 }

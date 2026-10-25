@@ -2,18 +2,22 @@ package com.acikarttirma.service;
 
 import com.acikarttirma.dto.AuctionEvent;
 import com.acikarttirma.dto.AuctionPayloads;
+import com.acikarttirma.dto.GameResultView;
 import com.acikarttirma.dto.LiveStateView;
 import com.acikarttirma.engine.Auction;
 import com.acikarttirma.engine.AuctionOutcome;
 import com.acikarttirma.engine.BidRejectReason;
 import com.acikarttirma.engine.BidResult;
 import com.acikarttirma.engine.PlayerState;
+import com.acikarttirma.engine.Tier3Assigner;
+import com.acikarttirma.engine.Tier3Assignment;
 import com.acikarttirma.engine.WithdrawResult;
 import com.acikarttirma.exception.ApiException;
 import com.acikarttirma.model.User;
 import com.acikarttirma.model.enums.Slot;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.EnumMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -43,17 +47,20 @@ public class AuctionOrchestrator {
     private final AuctionPersistence persistence;
     private final AuctionEventPublisher publisher;
     private final AuctionTimings timings;
+    private final ResultService resultService;
     private final ScheduledExecutorService scheduler;
 
     public AuctionOrchestrator(GuestService guestService,
                                AuctionPersistence persistence,
                                AuctionEventPublisher publisher,
                                AuctionTimings timings,
+                               ResultService resultService,
                                @Qualifier("auctionScheduler") ScheduledExecutorService scheduler) {
         this.guestService = guestService;
         this.persistence = persistence;
         this.publisher = publisher;
         this.timings = timings;
+        this.resultService = resultService;
         this.scheduler = scheduler;
     }
 
@@ -165,11 +172,68 @@ public class AuctionOrchestrator {
                 PlayerState state = game.players.get(ps.roomPlayerId());
                 List<Slot> filled = Arrays.stream(Slot.values()).filter(state::hasFilled).toList();
                 players.add(new LiveStateView.PlayerBudget(ps.roomPlayerId(), ps.userId(), ps.seat(),
-                        ps.username(), state.getBudget(), filled));
+                        ps.username(), state.getBudget(), state.isConnected(), filled));
             }
             return new LiveStateView(game.finished, game.cursor, game.items.size(), currentView, players);
         } finally {
             game.lock.unlock();
+        }
+    }
+
+    // ------------------------------------------------------------------ bağlantı durumu
+
+    /**
+     * Oyuncunun son WebSocket bağlantısı koptu. Sıradaki ihalelerde açan olarak atlanır; yürüyen
+     * ihalede lider değilse o ihaleden çekilmiş sayılır. Liderse teklifi geçerli kalır.
+     * Kopma, liderin karşısına çıkacak kimse bırakmadıysa ihale hemen kapanır.
+     */
+    public void onPlayerDisconnected(Long userId) {
+        for (LiveGame game : games.values()) {
+            Long roomPlayerId = game.roomPlayerByUser.get(userId);
+            if (roomPlayerId == null) {
+                continue;
+            }
+            game.lock.lock();
+            try {
+                PlayerState player = game.players.get(roomPlayerId);
+                if (game.stopped || game.finished || !player.isConnected()) {
+                    continue;
+                }
+                if (game.current != null) {
+                    game.current.onPlayerDisconnected(roomPlayerId);
+                } else {
+                    player.setConnected(false);
+                }
+                publisher.toRoom(game.roomId, AuctionEvent.of(AuctionEvent.PLAYER_DISCONNECTED,
+                        new AuctionPayloads.PlayerConnection(roomPlayerId)));
+                if (game.current != null && game.current.isDecided()) {
+                    closeCurrent(game);
+                }
+            } finally {
+                game.lock.unlock();
+            }
+        }
+    }
+
+    /** Oyuncu geri bağlandı. Yürüyen ihaleye giremez, sonrakilerde yine açabilir ve teklif verebilir. */
+    public void onPlayerConnected(Long userId) {
+        for (LiveGame game : games.values()) {
+            Long roomPlayerId = game.roomPlayerByUser.get(userId);
+            if (roomPlayerId == null) {
+                continue;
+            }
+            game.lock.lock();
+            try {
+                PlayerState player = game.players.get(roomPlayerId);
+                if (game.stopped || game.finished || player.isConnected()) {
+                    continue;
+                }
+                player.setConnected(true);
+                publisher.toRoom(game.roomId, AuctionEvent.of(AuctionEvent.PLAYER_RECONNECTED,
+                        new AuctionPayloads.PlayerConnection(roomPlayerId)));
+            } finally {
+                game.lock.unlock();
+            }
         }
     }
 
@@ -215,9 +279,44 @@ public class AuctionOrchestrator {
             }
             return;
         }
-        game.finished = true;
+        // Tüm ihaleler bitti: kısa bir bekleme sonrası tier 3 ataması ve oyun sonu.
         publisher.toRoom(game.roomId, AuctionEvent.of(AuctionEvent.AUCTIONS_FINISHED,
                 new AuctionPayloads.AuctionsFinished(budgets(game))));
+        scheduler.schedule(() -> runEndPhase(game), timings.getNextDelayMs(), TimeUnit.MILLISECONDS);
+    }
+
+    /**
+     * Oyun sonu: ihalede slotunu dolduramayan herkese tier 3 kartı (bütçe yetiyorsa) veya U19 ceza
+     * kartı verilir, sonra reytingler toplanıp kazanan belirlenir. Slotlar GK'dan RW'ye doğru işlenir.
+     */
+    private void runEndPhase(LiveGame game) {
+        game.lock.lock();
+        try {
+            if (game.stopped || game.finished) {
+                return;
+            }
+            Map<Slot, List<Tier3Assignment>> bySlot = new EnumMap<>(Slot.class);
+            for (Slot slot : Slot.values()) {
+                List<Tier3Assignment> list =
+                        Tier3Assigner.assign(slot, Tier3Pricing.priceFor(slot), game.players.values());
+                if (!list.isEmpty()) {
+                    bySlot.put(slot, list);
+                }
+            }
+            List<AuctionPayloads.Tier3Entry> entries = persistence.assignTier3(game.roomId, bySlot);
+            publisher.toRoom(game.roomId, AuctionEvent.of(AuctionEvent.TIER3_ASSIGNED,
+                    new AuctionPayloads.Tier3Assigned(entries, budgets(game))));
+
+            GameResultView result = resultService.finishGame(game.roomId);
+            game.finished = true;
+            publisher.toRoom(game.roomId, AuctionEvent.of(AuctionEvent.GAME_FINISHED, result));
+            // Biten oyun bir süre sorgulanabilsin (GET /live), sonra bellekten silinir.
+            scheduler.schedule(() -> games.remove(game.roomId), 10, TimeUnit.MINUTES);
+        } catch (RuntimeException e) {
+            log.error("Oyun sonu işlenemedi, oda={}", game.roomId, e);
+        } finally {
+            game.lock.unlock();
+        }
     }
 
     /** Sayacı baştan başlatır: her kabul edilen teklifte süre sıfırlanır. */
