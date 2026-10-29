@@ -1,27 +1,43 @@
 import React, { useState } from 'react';
+import GuestLogin from './components/GuestLogin';
 import MainMenu from './components/MainMenu';
 import Lobby from './components/Lobby';
 import DraftArena from './components/DraftArena';
 
 export default function App() {
-  const [currentScreen, setCurrentScreen] = useState('menu'); // menu, lobby, arena
-  const [selectedLobbyData, setSelectedLobbyData] = useState({ mode: "", difficulty: "" });
+  const [screen, setScreen] = useState(() => localStorage.getItem('playerToken') ? 'menu' : 'login');
+  const [gameConfig, setGameConfig] = useState({ modeName: 'Şampiyonlar Ligi', difficulty: 'Orta Zorluk' });
+  const [activeRoomId, setActiveRoomId] = useState(null);
 
-  const handlePlayStart = (modeName, difficulty) => {
-    setSelectedLobbyData({ mode: modeName, difficulty: difficulty });
-    setCurrentScreen('lobby');
+  const handleLoginSuccess = () => setScreen('menu');
+
+  const handleStartGame = (mode, diff) => {
+    setGameConfig({ modeName: mode || 'Şampiyonlar Ligi', difficulty: diff || 'Orta Zorluk' });
+    setScreen('lobby');
   };
 
-  // Lobideki süre bittiğinde bu fonksiyon tetiklenecek
-  const handleLobbyComplete = () => {
-    setCurrentScreen('arena');
+  const handleLobbyComplete = (roomId) => {
+    setActiveRoomId(roomId);
+    setScreen('arena');
   };
 
   return (
-    <>
-      {currentScreen === 'menu' && <MainMenu onPlayStart={handlePlayStart} />}
-      {currentScreen === 'lobby' && <Lobby modeName={selectedLobbyData.mode} difficulty={selectedLobbyData.difficulty} onLobbyComplete={handleLobbyComplete} />}
-      {currentScreen === 'arena' && <DraftArena />}
-    </>
+    <div>
+      {screen === 'login' && <GuestLogin onLoginSuccess={handleLoginSuccess} />}
+      {screen === 'menu' && <MainMenu onStartGame={handleStartGame} />}
+      {screen === 'lobby' && (
+        <Lobby 
+          modeName={gameConfig.modeName} 
+          difficulty={gameConfig.difficulty} 
+          onLobbyComplete={handleLobbyComplete} 
+        />
+      )}
+      {screen === 'arena' && (
+        <DraftArena 
+          roomId={activeRoomId} 
+          onExit={() => setScreen('menu')} 
+        />
+      )}
+    </div>
   );
 }
