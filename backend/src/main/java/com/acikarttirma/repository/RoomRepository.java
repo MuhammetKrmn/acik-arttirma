@@ -3,6 +3,7 @@ package com.acikarttirma.repository;
 import com.acikarttirma.model.Room;
 import com.acikarttirma.model.enums.RoomStatus;
 import jakarta.persistence.LockModeType;
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -13,6 +14,9 @@ import org.springframework.data.repository.query.Param;
 public interface RoomRepository extends JpaRepository<Room, Long> {
 
     List<Room> findByStatus(RoomStatus status);
+
+    /** Hızlı eşleşme: belli bir andan sonra kurulmuş açık odalar, en eskisi önce. */
+    List<Room> findByStatusAndCreatedAtAfterOrderByIdAsc(RoomStatus status, Instant createdAfter);
 
     /** Katılma sırasında odayı kilitler: iki kişi aynı anda 3. oyuncu olamaz. */
     @Lock(LockModeType.PESSIMISTIC_WRITE)

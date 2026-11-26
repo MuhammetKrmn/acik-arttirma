@@ -63,7 +63,7 @@ abstract class FlowTestSupport {
     @Autowired
     protected JdbcTemplate jdbc;
 
-    private final List<Long> createdRooms = new ArrayList<>();
+    protected final List<Long> createdRooms = new ArrayList<>();
     private final List<Long> createdUsers = new ArrayList<>();
 
     @AfterEach

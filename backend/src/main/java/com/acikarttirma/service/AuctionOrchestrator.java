@@ -69,10 +69,15 @@ public class AuctionOrchestrator {
     /** SETUP durumundaki odayı başlatır. Odanın herhangi bir oyuncusu başlatabilir. */
     public void startGame(Long roomId, String token) {
         User user = guestService.authenticate(token);
+        startGameFor(roomId, user.getId());
+    }
+
+    /** Oyunu odanın bir oyuncusu adına başlatır. Lobi sayacı da bunu kullanır. */
+    public void startGameFor(Long roomId, Long userId) {
         if (games.containsKey(roomId)) {
             throw new ApiException(HttpStatus.CONFLICT, "GAME_ALREADY_STARTED", "Oyun zaten başladı");
         }
-        GameSnapshot snapshot = persistence.beginGame(roomId, user.getId());
+        GameSnapshot snapshot = persistence.beginGame(roomId, userId);
         LiveGame game = new LiveGame(snapshot);
         games.put(roomId, game);
 
