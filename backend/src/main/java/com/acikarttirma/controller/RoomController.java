@@ -2,8 +2,11 @@ package com.acikarttirma.controller;
 
 import com.acikarttirma.dto.CreateRoomRequest;
 import com.acikarttirma.dto.LiveStateView;
+import com.acikarttirma.dto.LobbyView;
+import com.acikarttirma.dto.ReadyRequest;
 import com.acikarttirma.dto.RoomView;
 import com.acikarttirma.service.AuctionOrchestrator;
+import com.acikarttirma.service.LobbyService;
 import com.acikarttirma.service.RoomService;
 import java.util.List;
 import org.springframework.http.HttpStatus;
@@ -24,10 +27,13 @@ public class RoomController {
 
     private final RoomService roomService;
     private final AuctionOrchestrator auctionOrchestrator;
+    private final LobbyService lobbyService;
 
-    public RoomController(RoomService roomService, AuctionOrchestrator auctionOrchestrator) {
+    public RoomController(RoomService roomService, AuctionOrchestrator auctionOrchestrator,
+                          LobbyService lobbyService) {
         this.roomService = roomService;
         this.auctionOrchestrator = auctionOrchestrator;
+        this.lobbyService = lobbyService;
     }
 
     @PostMapping
@@ -35,13 +41,23 @@ public class RoomController {
     public RoomView create(@RequestHeader(value = TOKEN_HEADER, required = false) String token,
                            @RequestBody(required = false) CreateRoomRequest request) {
         Long seed = request != null ? request.seed() : null;
-        return roomService.createRoom(token, seed);
+        RoomView room = roomService.createRoom(token, seed);
+        lobbyService.onRoomChanged(room);
+        return room;
+    }
+
+    /** Tek tıkla eşleşme: açık odaya sokar, yoksa oda kurar. Frontend'in kullanacağı yol budur. */
+    @PostMapping("/quick-join")
+    public RoomView quickJoin(@RequestHeader(value = TOKEN_HEADER, required = false) String token) {
+        return lobbyService.quickJoin(token);
     }
 
     @PostMapping("/{roomId}/join")
     public RoomView join(@RequestHeader(value = TOKEN_HEADER, required = false) String token,
                          @PathVariable Long roomId) {
-        return roomService.joinRoom(token, roomId);
+        RoomView room = roomService.joinRoom(token, roomId);
+        lobbyService.onRoomChanged(room);
+        return room;
     }
 
     @GetMapping("/{roomId}")
@@ -55,12 +71,28 @@ public class RoomController {
         return roomService.listOpenRooms();
     }
 
-    /** SETUP durumundaki odayı başlatır. İlk ihale birkaç saniye sonra açılır. */
+    /** Lobinin anlık durumu: oyuncular, kim hazır, oyunun kendiliğinden başlayacağı an. */
+    @GetMapping("/{roomId}/lobby")
+    public LobbyView lobby(@PathVariable Long roomId) {
+        return lobbyService.getLobby(roomId);
+    }
+
+    /** "Hazırım" (gövdesiz veya {"ready": true}) ve "İptal" ({"ready": false}). */
+    @PostMapping("/{roomId}/ready")
+    public LobbyView ready(@RequestHeader(value = TOKEN_HEADER, required = false) String token,
+                           @PathVariable Long roomId,
+                           @RequestBody(required = false) ReadyRequest request) {
+        boolean ready = request == null || request.ready() == null || request.ready();
+        return lobbyService.setReady(roomId, token, ready);
+    }
+
+    /** SETUP durumundaki odayı elle başlatır (test sayfası için). Normalde oyunu lobi başlatır. */
     @PostMapping("/{roomId}/start")
     @ResponseStatus(HttpStatus.ACCEPTED)
     public void start(@RequestHeader(value = TOKEN_HEADER, required = false) String token,
                       @PathVariable Long roomId) {
         auctionOrchestrator.startGame(roomId, token);
+        lobbyService.onStartedElsewhere(roomId);
     }
 
     /** Canlı oyunun anlık durumu (istemci kendini senkronlamak için). */

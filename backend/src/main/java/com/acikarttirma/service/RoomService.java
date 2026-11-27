@@ -10,8 +10,11 @@ import com.acikarttirma.model.enums.RoomStatus;
 import com.acikarttirma.repository.ConceptRepository;
 import com.acikarttirma.repository.RoomPlayerRepository;
 import com.acikarttirma.repository.RoomRepository;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Optional;
 import java.util.Random;
 import java.util.concurrent.ThreadLocalRandom;
 import org.springframework.http.HttpStatus;
@@ -23,6 +26,8 @@ public class RoomService {
 
     public static final int STARTING_BUDGET = 1000;
     public static final int ROOM_SIZE = 3;
+    /** Hızlı eşleşmede bundan eski açık odalar kullanılmaz (terk edilmiş odalara düşmemek için). */
+    public static final Duration OPEN_ROOM_MAX_AGE = Duration.ofMinutes(10);
 
     private final GuestService guestService;
     private final RoomRepository roomRepository;
@@ -81,6 +86,33 @@ public class RoomService {
             cardDrawer.draw(room);
         }
         return toView(room);
+    }
+
+    /**
+     * Hızlı eşleşme. Kullanıcı son 10 dakikada girdiği ve hâlâ bekleyen (LOBBY veya SETUP) bir odadaysa o oda döner.
+     * Yoksa son 10 dakikada kurulmuş en eski açık odaya katılır, hiç yoksa yeni oda kurar.
+     * Aynı anda gelen istekleri LobbyService tek tek sokar.
+     */
+    @Transactional
+    public RoomView quickJoin(String token) {
+        User user = guestService.authenticate(token);
+        Instant after = Instant.now().minus(OPEN_ROOM_MAX_AGE);
+        Optional<RoomPlayer> waiting = roomPlayerRepository
+                .findByUser_IdAndRoom_StatusIn(user.getId(), List.of(RoomStatus.LOBBY, RoomStatus.SETUP))
+                .stream()
+                .filter(rp -> rp.getRoom().getCreatedAt().isAfter(after))
+                .max(Comparator.comparing(rp -> rp.getRoom().getId()));
+        if (waiting.isPresent()) {
+            return toView(waiting.get().getRoom());
+        }
+        for (Room candidate : roomRepository.findByStatusAndCreatedAtAfterOrderByIdAsc(RoomStatus.LOBBY, after)) {
+            try {
+                return joinRoom(token, candidate.getId());
+            } catch (ApiException e) {
+                // Bu arada dolmuş olabilir, sıradaki odayı dene.
+            }
+        }
+        return createRoom(token, null);
     }
 
     @Transactional(readOnly = true)

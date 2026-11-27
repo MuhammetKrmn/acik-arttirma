@@ -16,6 +16,7 @@ public record AuctionEvent(String type, Object data) {
     public static final String PLAYER_RECONNECTED = "player_reconnected";
     public static final String TIER3_ASSIGNED = "tier3_assigned";
     public static final String GAME_FINISHED = "game_finished";
+    public static final String LOBBY_UPDATED = "lobby_updated";
 
     public static AuctionEvent of(String type, Object data) {
         return new AuctionEvent(type, data);

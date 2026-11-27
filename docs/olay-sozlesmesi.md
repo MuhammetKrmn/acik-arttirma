@@ -15,9 +15,9 @@ Tüm uçların şeması ayrıca Swagger'da: `http://localhost:8080/swagger-ui.ht
 ## 2. Oyun akışı
 
 1. Misafir girişi → `playerToken` alınır.
-2. Oda kur (`POST /api/rooms`) veya açık odaya katıl (`POST /api/rooms/{id}/join`). Oda `LOBBY` durumundadır.
+2. Hızlı eşleşme (`POST /api/rooms/quick-join`, bölüm 9): açık odaya girilir, yoksa oda kurulur. Oda `LOBBY` durumundadır.
 3. 3. oyuncu katılınca oda `SETUP` olur.
-4. Odanın bir oyuncusu `POST /api/rooms/{id}/start` çağırır (202). Oda `/topic/rooms/{id}` üzerinden `game_started` yayınlar.
+4. Oyunu sunucu başlatır: üç oyuncu da hazır olunca hemen, değilse oda dolduktan 30 sn sonra (bölüm 9). Oda `/topic/rooms/{id}` üzerinden `game_started` yayınlar. (`POST /api/rooms/{id}/start` sadece test sayfası için durur.)
 5. Yaklaşık 5 sn sonra ilk ihale açılır (`auction_started`). 22 ihale sırayla yapılır (T1 ve T2 kartları).
 6. Her ihalede: açan oyuncu açılış fiyatını otomatik verir ve lider olur. Diğerleri +1/+5/+10 ile yükseltir veya çekilir. Son kabul edilen tekliften **10 sn** sonra ihale kapanır, lider kartı alır (`auction_closed`). Sonraki ihale yaklaşık 3 sn sonra açılır.
 7. 22 ihale bitince `auctions_finished`, kısa bir beklemeden sonra boş kalan slotlar için Tier 3 / U19 ataması (`tier3_assigned`) ve oyun sonu (`game_finished`).
@@ -39,6 +39,8 @@ Mevkiler: `GK, LB, CB, RB, CDM, CM, CAM, LW, ST, RW` (CB_1 ve CB_2 ikisi de CB m
 | `POST /api/rooms/{roomId}/start` | başlık: `X-Player-Token`. Odanın herhangi bir oyuncusu, oda `SETUP` olmalı | 202 (gövdesiz) |
 | `GET /api/rooms/{roomId}/live` | - | 200 `LiveStateView` (bağlanan veya kopup dönen istemci kendini buradan senkronlar) |
 | `GET /api/rooms/{roomId}/result` | - | 200 `GameResultView` (oyun bitince). Bitmediyse 409 `GAME_NOT_FINISHED` |
+
+Lobi uçları (`quick-join`, `lobby`, `ready`) için bölüm 9'a bak.
 
 ### RoomView
 
@@ -97,12 +99,12 @@ Not: İstek gövdesi hiç yoksa veya bozuk JSON ise Spring'in standart 400 cevab
 - Bağlantı: `ws://localhost:8080/ws` (düz WebSocket, **SockJS yok**).
 - CONNECT başlığı: `X-Player-Token: <playerToken>`. Geçersizse bağlantı reddedilir.
 - Abonelikler:
-    - `/topic/rooms/{roomId}`: oda olayları (herkese)
-    - `/user/queue/bids`: sadece sana giden olaylar (`bid_rejected`, `withdraw_rejected`)
-    - `/user/queue/errors`: iş kuralı hataları `{ "code", "message" }` (ör. odada değilsin)
+  - `/topic/rooms/{roomId}`: oda olayları (herkese)
+  - `/user/queue/bids`: sadece sana giden olaylar (`bid_rejected`, `withdraw_rejected`)
+  - `/user/queue/errors`: iş kuralı hataları `{ "code", "message" }` (ör. odada değilsin)
 - Göndereceğin mesajlar:
-    - `/app/rooms/{roomId}/bid` gövde `{ "expectedPrice": 25, "increment": 5 }`. `expectedPrice` ekranda gördüğün güncel fiyat, `increment` 1, 5 veya 10.
-    - `/app/rooms/{roomId}/withdraw` gövdesiz. Bu ihaleden çekilir, bir daha giremezsin. Lider çekilemez.
+  - `/app/rooms/{roomId}/bid` gövde `{ "expectedPrice": 25, "increment": 5 }`. `expectedPrice` ekranda gördüğün güncel fiyat, `increment` 1, 5 veya 10.
+  - `/app/rooms/{roomId}/withdraw` gövdesiz. Bu ihaleden çekilir, bir daha giremezsin. Lider çekilemez.
 
 ## 5. Olaylar
 
@@ -114,6 +116,7 @@ Her olay şu zarfla gelir: `{ "type": "...", "data": { ... } }`.
 
 | type | data |
 | --- | --- |
+| `lobby_updated` | `LobbyView` (bölüm 9). Lobide biri katıldı, hazır oldu veya iptal etti |
 | `game_started` | `{ "totalAuctions": 22 }` |
 | `auction_started` | `{ "sequenceNo", "totalAuctions", "slot", "tier", "card": CardInfo, "price", "openerRoomPlayerId", "deadlineMs", "serverNowMs" }`. `price` açılış fiyatı, `openerRoomPlayerId` açan ve ilk lider olan oyuncudur |
 | `bid_accepted` | `{ "sequenceNo", "price", "leaderRoomPlayerId", "increment", "deadlineMs", "serverNowMs" }` (sayaç sıfırlanır) |
@@ -175,6 +178,7 @@ Her olay şu zarfla gelir: `{ "type": "...", "data": { ... } }`.
 
 | Ayar | Varsayılan |
 | --- | --- |
+| `lobby.countdown-ms` | 30000 (oda dolduktan sonra oyunun kendiliğinden başlaması) |
 | `auction.first-delay-ms` | 5000 (oyun başlayınca ilk ihaleye kadar) |
 | `auction.next-delay-ms` | 3000 (ihaleler arası) |
 | `auction.bid-timeout-ms` | 10000 (son tekliften sonra kapanış) |
@@ -182,3 +186,38 @@ Her olay şu zarfla gelir: `{ "type": "...", "data": { ... } }`.
 ## 8. Tier 3 ve U19 kuralı
 
 22 ihaleden sonra her slot için (`GK` → `RW` sırasıyla): sabit fiyatla otomatik atama. Hücum slotları (`LW`, `ST`, `RW`) 30, diğerleri 20. Bütçesi yetiyorsa oyuncu o slotun Tier 3 kartını alır (`TIER3_AUTO`). Yetmiyorsa fiyatı 0 olan, konseptin U19 havuzundan rastgele bir ceza kartı verilir (`U19_PENALTY`). Aynı futbolcu bir kadroda iki kez bulunmaz.
+
+## 9. Lobi (F8)
+
+Frontend oda kurmak ve katılmak için `POST /api/rooms/quick-join` kullanır. Oyunu frontend başlatmaz, sunucu başlatır.
+
+| Uç | İstek | Cevap |
+| --- | --- | --- |
+| `POST /api/rooms/quick-join` | başlık `X-Player-Token`, gövde yok | 200 `RoomView`. Açık odaya sokar, yoksa oda kurar. Zaten bekleyen bir odadaysan o oda döner |
+| `GET /api/rooms/{roomId}/lobby` | - | 200 `LobbyView` |
+| `POST /api/rooms/{roomId}/ready` | başlık `X-Player-Token`. Gövde yok veya `{ "ready": true }` = hazırım, `{ "ready": false }` = iptal | 200 `LobbyView`. Odada değilsen 403 `NOT_IN_ROOM`, oyun başladıysa 409 `GAME_ALREADY_STARTED` |
+
+Kurallar:
+- 3. oyuncu katılınca oda `SETUP` olur ve **30 sn** lobi sayacı başlar.
+- Üç oyuncu da hazır olunca oyun hemen başlar. Kimse hazır olmasa da sayaç bitince kendiliğinden başlar.
+- Başlayınca herkese `game_started` gider. Frontend bu olayla arenaya geçer.
+
+Olay: `lobby_updated` (`/topic/rooms/{roomId}`), lobi her değiştiğinde (biri katıldı, hazır oldu, iptal etti). `data` bir `LobbyView`:
+
+```json
+{
+  "roomId": 5,
+  "status": "SETUP",
+  "conceptName": "Şampiyonlar Ligi",
+  "startingBudget": 1000,
+  "players": [
+    { "roomPlayerId": 11, "userId": 3, "seatNumber": 1, "username": "Kursat", "ready": true }
+  ],
+  "countdownDeadlineMs": 1790000030000,
+  "serverNowMs": 1790000000000
+}
+```
+
+`countdownDeadlineMs` oda dolana kadar `null`. Kalan süre = `countdownDeadlineMs - serverNowMs`.
+
+Önerilen sıra: giriş → `quick-join` → WebSocket'e bağlan ve `/topic/rooms/{roomId}`'e abone ol → `GET /lobby` ile ilk durumu al → `lobby_updated` ile güncelle → `game_started` gelince arenaya geç (aynı WebSocket bağlantısıyla).
