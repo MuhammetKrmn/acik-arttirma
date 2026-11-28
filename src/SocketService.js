@@ -1,83 +1,77 @@
 import { Client } from '@stomp/stompjs';
+import { WS_URL } from './api';
 
+// Tek bir STOMP bağlantısı. Lobi ve arena AYNI bağlantıyı kullanır:
+// ekran değişince bağlantı kopmaz, sadece olayları dinleyen fonksiyonlar (handlers) değişir.
+// Bağlantı koparsa kütüphane 3 sn'de bir yeniden bağlanır ve onConnected tekrar çağrılır
+// (ekran bu anda kendini REST ile senkronlar).
 class SocketService {
   constructor() {
     this.client = null;
+    this.key = null;
+    this.handlers = {};
   }
 
-  // Canlı ihaleye bağlanma fonksiyonu
-  connect(playerToken, roomId, onRoomEvent, onPersonalEvent, onError) {
-    if (!playerToken) {
-      console.error("🔴 HATA: Player Token bulunamadı! Misafir girişi (guest login) yapıldı mı?");
+  /**
+   * handlers: { onRoomEvent, onPersonalEvent, onError, onConnected }
+   * Aynı token ve oda için zaten bağlıysa yeniden bağlanmaz, sadece handlers'ı günceller.
+   */
+  connect(playerToken, roomId, handlers = {}) {
+    this.handlers = handlers;
+    const key = `${playerToken}|${roomId}`;
+    if (this.client && this.key === key) {
+      if (this.client.connected) this.handlers.onConnected?.();
       return;
     }
+    this.disconnect();
+    this.key = key;
 
-    this.client = new Client({
-      brokerURL: 'ws://localhost:8080/ws', // Backend ekibinin verdiği adres
-      connectHeaders: {
-        'X-Player-Token': playerToken, // Güvenlik başlığı
-      },
-      reconnectDelay: 5000, // Koparsa 5 saniyede bir tekrar dener
-      
+    const client = new Client({
+      brokerURL: WS_URL,
+      connectHeaders: { 'X-Player-Token': playerToken },
+      reconnectDelay: 3000,
       onConnect: () => {
-        console.log("🟢 Canlı İhale Sunucusuna Bağlanıldı!");
-
-        // 1. Odadaki HERKESE giden genel olaylar (game_started, bid_accepted vb.)
-        this.client.subscribe(`/topic/rooms/${roomId}`, (message) => {
-          const data = JSON.parse(message.body);
-          onRoomEvent(data);
-        });
-
-        // 2. SADECE SANA gelen özel ret mesajları (bid_rejected, withdraw_rejected)
-        this.client.subscribe('/user/queue/bids', (message) => {
-          const data = JSON.parse(message.body);
-          onPersonalEvent(data);
-        });
-
-        // 3. SADECE SANA gelen sistem hataları
-        this.client.subscribe('/user/queue/errors', (message) => {
-          const data = JSON.parse(message.body);
-          onError(data);
-        });
+        client.subscribe(`/topic/rooms/${roomId}`, (m) => this.handlers.onRoomEvent?.(JSON.parse(m.body)));
+        client.subscribe('/user/queue/bids', (m) => this.handlers.onPersonalEvent?.(JSON.parse(m.body)));
+        client.subscribe('/user/queue/errors', (m) => this.handlers.onError?.(JSON.parse(m.body)));
+        this.handlers.onConnected?.();
       },
-      
       onStompError: (frame) => {
-        console.error('🔴 STOMP Hatası:', frame.headers['message']);
+        console.error('STOMP hatası:', frame.headers['message']);
       },
     });
-
-    this.client.activate(); // Motoru çalıştır
+    this.client = client;
+    client.activate();
   }
 
-  // Fiyat artırma (Teklif) gönderme fonksiyonu
+  /** Ekran değişince olayları yeni ekrana yönlendirmek için. */
+  setHandlers(handlers = {}) {
+    this.handlers = handlers;
+  }
+
   sendBid(roomId, expectedPrice, increment) {
-    if (this.client && this.client.connected) {
-      this.client.publish({
-        destination: `/app/rooms/${roomId}/bid`,
-        body: JSON.stringify({ expectedPrice, increment }),
-      });
-    } else {
-      console.warn("Bağlantı yok, teklif gönderilemedi!");
-    }
+    if (!this.client?.connected) return false;
+    this.client.publish({
+      destination: `/app/rooms/${roomId}/bid`,
+      body: JSON.stringify({ expectedPrice, increment }),
+    });
+    return true;
   }
 
-  // İhaleden çekilme fonksiyonu
   sendWithdraw(roomId) {
-    if (this.client && this.client.connected) {
-      this.client.publish({
-        destination: `/app/rooms/${roomId}/withdraw`,
-      });
-    }
+    if (!this.client?.connected) return false;
+    this.client.publish({ destination: `/app/rooms/${roomId}/withdraw` });
+    return true;
   }
 
-  // Sayfadan çıkınca bağlantıyı temizleme
+  /** Sadece oyundan tamamen çıkarken (ana menüye dönüş, çıkış) çağrılır. */
   disconnect() {
     if (this.client) {
       this.client.deactivate();
-      console.log("⚪ Bağlantı koparıldı.");
+      this.client = null;
+      this.key = null;
     }
   }
 }
 
-// Tüm projenin kullanacağı tek bir servis kopyası oluşturuyoruz
 export const socketService = new SocketService();

@@ -1,6 +1,10 @@
 import { FORMATION_POSITIONS } from '../../constants/draft';
+import { slotLabel } from '../../game/labels';
+
+const TYPE_BADGE = { TIER3_AUTO: 'T3', U19_PENALTY: 'U19' };
 
 // Saha + oyuncular. Bulunduğu kutuyu tamamen doldurur (w-full h-full).
+// squad: { [slot]: { name, price, type } }. Reyting oyun bitene kadar gizli, fiyat gösterilir.
 export default function Pitch({ squad }) {
   return (
     <div className="w-full h-full bg-gradient-to-b from-emerald-900 to-emerald-950 rounded-2xl border-2 border-emerald-600/60 relative overflow-hidden shadow-inner">
@@ -12,8 +16,9 @@ export default function Pitch({ squad }) {
       <div className="absolute top-0 inset-x-0 mx-auto w-28 h-10 border-b-2 border-l-2 border-r-2 border-emerald-500/50 rounded-b-lg"></div>
 
       {FORMATION_POSITIONS.map((pos) => {
-        const playerInSlot = squad[pos.id] || (pos.id === 'CB1' ? squad['CB'] : null);
-        const label = pos.id.replace(/[0-9]/g, '');
+        const playerInSlot = squad[pos.id];
+        const label = slotLabel(pos.id);
+        const badge = playerInSlot ? TYPE_BADGE[playerInSlot.type] : null;
 
         return (
           <div
@@ -23,7 +28,9 @@ export default function Pitch({ squad }) {
           >
             {playerInSlot ? (
               <div className="bg-slate-950/90 border border-yellow-500 px-2 py-1 rounded-lg flex flex-col items-center shadow-lg w-20 text-center">
-                <span className="text-[10px] font-black text-yellow-400 leading-none">{playerInSlot.rating} {label}</span>
+                <span className="text-[10px] font-black text-yellow-400 leading-none">
+                  {label}{playerInSlot.price != null ? ` · ${playerInSlot.price}M` : ''}{badge ? ` · ${badge}` : ''}
+                </span>
                 <span className="text-[9px] font-bold text-white truncate w-full">{playerInSlot.name}</span>
               </div>
             ) : (

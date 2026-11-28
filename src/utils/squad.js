@@ -1,8 +1,7 @@
-// Kadrodaki oyuncu sayısı ve ortalama reyting
+// Kadrodaki oyuncu sayısı ve harcanan para.
+// Reyting oyun bitene kadar gizli olduğu için ortalama reyting gösterilmez.
 export function getSquadStats(squad) {
   const players = Object.values(squad);
-  const avg = players.length
-    ? Math.round(players.reduce((sum, p) => sum + p.rating, 0) / players.length)
-    : null;
-  return { count: players.length, avg };
+  const spent = players.reduce((sum, p) => sum + (p.price ?? 0), 0);
+  return { count: players.length, spent };
 }
