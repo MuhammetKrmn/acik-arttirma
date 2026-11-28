@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useReducer, useState } from 'react';
 import PlayerCard from './PlayerCard';
 import FitToHeight from './draft/FitToHeight';
 import OpponentPanel from './draft/OpponentPanel';
@@ -6,11 +6,13 @@ import SquadPanel from './draft/SquadPanel';
 import AllSquadsOverlay from './draft/AllSquadsOverlay';
 import QuickChat from './draft/QuickChat';
 import BottomBar from './draft/BottomBar';
-import useAuctionTimer from '../hooks/useAuctionTimer';
+import useCountdown from '../hooks/useCountdown';
 import useChatBubbles from '../hooks/useChatBubbles';
 import { BOTTOM_BAR_HEIGHT } from '../constants/draft';
-import { DEFAULT_PLAYERS, MOCK_PLAYER } from '../constants/mockData';
+import { api } from '../api';
 import { socketService } from '../SocketService.js';
+import { arenaReducer, initialArenaState } from '../game/arenaReducer';
+import { avatarForSeat } from '../game/labels';
 
 // Aynı anda sadece bir panel açık olabilir
 const PANEL = {
@@ -19,82 +21,57 @@ const PANEL = {
   squad: (playerId) => `squad:${playerId}`,
 };
 
-export default function DraftArena({
-  players = DEFAULT_PLAYERS,
-  myId = 'me',
-  incomingMessage = null,
-  onChatSend,
-  onBid,
-  onPass,
-}) {
-  const { timeLeft, auctionStatus, resetTimer } = useAuctionTimer();
-  const { messages, showMessage } = useChatBubbles({ players, myId, incomingMessage });
+// Oyun bitince sonuç ekranına geçmeden önce son kadroları görmek için bekleme
+const RESULT_DELAY_MS = 3000;
 
-  const [currentBid, setCurrentBid] = useState(10);
-  const [highestBidder, setHighestBidder] = useState(null);
-  const [isPassed, setIsPassed] = useState(false);
+export default function DraftArena({ session, roomId, onFinished }) {
+  const [state, dispatch] = useReducer(arenaReducer, initialArenaState);
   const [openPanel, setOpenPanel] = useState(null);
 
-  const roomId = "1";
-
-  // 🟢 DİNAMİK MİSAFİR GİRİŞİ VE BAĞLANTI YÖNETİMİ
+  // Bağlantı ve olaylar. Lobiden gelindiyse bağlantı zaten açık, sadece dinleyiciler değişir.
   useEffect(() => {
-    let isMounted = true;
-
-    async function initSessionAndSocket() {
+    let alive = true;
+    let retryId = null;
+    const resync = async () => {
+      clearTimeout(retryId);
       try {
-        // 1. Backend'e misafir girişi isteği atıp gerçek token'ı alıyoruz
-        const response = await fetch('http://localhost:8080/api/guests', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({ name: "Kürşat" }), // Backend'in beklediği misafir adı
-        });
-
-        if (!response.ok) {
-          throw new Error('Misafir girişi başarısız oldu!');
-        }
-
-        const data = await response.json();
-        // Token'ı nesne içinden veya doğrudan alıyoruz
-        const token = data.token || data.accessToken || data; 
-
-        if (!isMounted) return;
-
-        console.log("🎟️ Gerçek Player Token Alındı:", token);
-
-        const handleRoomEvent = (event) => {
-          console.log("📢 Odadan Mesaj Geldi:", event.type, event.data);
-        };
-
-        const handlePersonalEvent = (event) => {
-          console.log("📩 Özel Ret Geldi:", event.type, event.data);
-          if (event.type === 'bid_rejected') {
-            console.warn(`Teklif reddedildi: ${event.data.reason || 'Fiyat değişmiş olabilir'}`);
-          }
-        };
-
-        const handleError = (error) => {
-          console.error("🚨 Sistem Hatası:", error);
-        };
-
-        // 2. Gerçek token ile WebSocket bağlantısını başlatıyoruz
-        socketService.connect(token, roomId, handleRoomEvent, handlePersonalEvent, handleError);
-
+        const live = await api.getLive(roomId);
+        if (alive) dispatch({ type: 'live', data: live, receivedAt: Date.now() });
       } catch (err) {
-        console.error("🔴 Oturum açma veya WebSocket bağlantı hatası:", err);
+        if (!alive) return;
+        // Oyun sunucuda henüz kurulmadıysa 1 sn sonra tekrar sor.
+        if (err.code === 'GAME_NOT_STARTED') retryId = setTimeout(resync, 1000);
+        else dispatch({ type: 'toast', text: err.message });
       }
-    }
-
-    initSessionAndSocket();
-
-    // Bileşen kapandığında bağlantıyı koparıyoruz
-    return () => {
-      isMounted = false;
-      socketService.disconnect();
     };
-  }, []);
+
+    socketService.connect(session.playerToken, roomId, {
+      onRoomEvent: (event) => dispatch({ type: 'event', event, receivedAt: Date.now() }),
+      onPersonalEvent: (event) => dispatch({ type: 'rejected', data: event.data }),
+      onError: (e) => dispatch({ type: 'toast', text: e.message }),
+      onConnected: resync,
+    });
+
+    return () => {
+      alive = false;
+      clearTimeout(retryId);
+      socketService.setHandlers({});
+    };
+  }, [roomId, session.playerToken]);
+
+  // Oyun bitti: kısa bir bekleyişten sonra sonuç ekranı
+  useEffect(() => {
+    if (!state.result) return undefined;
+    const id = setTimeout(() => onFinished(state.result), RESULT_DELAY_MS);
+    return () => clearTimeout(id);
+  }, [state.result, onFinished]);
+
+  // Uyarı yazısı 3 sn sonra kaybolur
+  useEffect(() => {
+    if (!state.toast) return undefined;
+    const id = setTimeout(() => dispatch({ type: 'clearToast', id: state.toast.id }), 3000);
+    return () => clearTimeout(id);
+  }, [state.toast]);
 
   // Esc ile açık paneli kapat
   useEffect(() => {
@@ -103,43 +80,79 @@ export default function DraftArena({
     return () => window.removeEventListener('keydown', onKey);
   }, []);
 
+  // Ekran bileşenlerinin beklediği oyuncu biçimi: { id, name, avatar, budget, squad }
+  const players = state.players.map((p) => ({
+    id: p.roomPlayerId,
+    name: p.connected ? p.username : `${p.username} (koptu)`,
+    avatar: avatarForSeat(p.seatNumber),
+    budget: p.budget,
+    squad: state.squads[p.roomPlayerId] ?? {},
+  }));
+  const myId = state.players.find((p) => p.userId === session.userId)?.roomPlayerId ?? null;
+
+  const { messages, showMessage } = useChatBubbles({ players, myId, incomingMessage: null });
+
+  const cur = state.current;
+  const secondsLeft = useCountdown(cur?.status === 'bidding' ? cur.deadlineLocal : null);
+
   const me = players.find((p) => p.id === myId);
   const [leftOpp, rightOpp] = players.filter((p) => p.id !== myId);
 
-  if (!me || !leftOpp || !rightOpp) return null;
+  if (!me || !leftOpp || !rightOpp) {
+    return (
+      <div className="min-h-screen bg-slate-950 text-white flex flex-col items-center justify-center gap-4 animate-fade-in">
+        <div className="w-12 h-12 border-4 border-emerald-500 border-t-transparent rounded-full animate-spin"></div>
+        <p className="text-slate-400 font-bold uppercase tracking-widest text-sm">Oyun yükleniyor...</p>
+      </div>
+    );
+  }
 
-  const togglePanel = (panel) => setOpenPanel((cur) => (cur === panel ? null : panel));
+  const togglePanel = (panel) => setOpenPanel((c) => (c === panel ? null : panel));
   const closePanel = () => setOpenPanel(null);
 
+  const bidding = cur?.status === 'bidding';
+  const currentBid = cur?.price ?? 0;
+  const amIWinning = bidding && cur.leaderRoomPlayerId === myId;
+  const lockedText = !bidding
+    ? null
+    : cur.withdrawn.includes(myId)
+      ? 'PAS GEÇTİN'
+      : me.squad[cur.slot]
+        ? 'BU MEVKİ DOLU'
+        : null;
+
+  let idleText = null;
+  if (state.phase === 'finished') idleText = 'OYUN BİTTİ';
+  else if (state.phase === 'tier3') idleText = 'KADROLAR TAMAMLANIYOR';
+  else if (!cur) idleText = 'İLK İHALE BAŞLIYOR';
+  else if (cur.status === 'sold') idleText = 'İHALE SONUÇLANDI';
+  else if (cur.status === 'skipped') idleText = 'KART SATILMADI';
+
+  const nameOf = (roomPlayerId) =>
+    roomPlayerId === myId ? 'Sen' : players.find((p) => p.id === roomPlayerId)?.name ?? null;
+  const leaderLabel = cur ? nameOf(cur.leaderRoomPlayerId) : null;
+
+  // Teklif ve çekilme: sadece sunucuya gönderilir. Ekran, sunucu bid_accepted / player_withdrew
+  // gönderince değişir. Böylece üç ekran da her zaman aynı fiyatı ve lideri gösterir.
   const handleBid = (amount) => {
-    if (isPassed || highestBidder === myId || me.budget < currentBid + amount) return;
-
-    socketService.sendBid(roomId, currentBid, amount);
-
-    setCurrentBid((prev) => prev + amount);
-    setHighestBidder(myId);
-    resetTimer();
-    if (onBid) onBid(amount);
+    if (!bidding || lockedText || amIWinning || me.budget < currentBid + amount) return;
+    if (!socketService.sendBid(roomId, currentBid, amount)) {
+      dispatch({ type: 'toast', text: 'Bağlantı yok, yeniden bağlanılıyor...' });
+    }
   };
 
   const handlePass = () => {
+    if (!bidding || lockedText || amIWinning) return;
     socketService.sendWithdraw(roomId);
-
-    setIsPassed(true);
-    setHighestBidder(null);
-    if (onPass) onPass();
   };
 
+  // Hızlı mesajlar backend'e gitmez, sadece senin ekranında balon olarak görünür.
   const sendQuickReply = (text) => {
     showMessage(myId, text);
-    if (onChatSend) onChatSend(text);
     closePanel();
   };
 
-  const isDangerZone = timeLeft <= 3 && auctionStatus === 'bidding';
-  const highestBidderLabel = highestBidder
-    ? (highestBidder === myId ? 'Sen' : players.find((p) => p.id === highestBidder)?.name ?? null)
-    : null;
+  const isDangerZone = bidding && secondsLeft !== null && secondsLeft <= 3;
 
   return (
     <div className={`min-h-screen bg-slate-950 text-white font-sans overflow-hidden flex flex-col relative select-none transition-all duration-500 ${isDangerZone ? 'shadow-[inset_0_0_150px_rgba(239,68,68,0.15)]' : ''}`}>
@@ -150,32 +163,49 @@ export default function DraftArena({
         style={{ paddingBottom: BOTTOM_BAR_HEIGHT }}
       >
         <FitToHeight>
-          <div className={`mb-2 flex flex-col items-center transition-transform duration-300 ${isDangerZone ? 'scale-125' : 'scale-100'}`}>
-            <span className="text-slate-400 font-bold uppercase tracking-widest text-xs mb-1">Kalan Süre</span>
-            <div className={`text-6xl font-black drop-shadow-lg ${isDangerZone ? 'text-red-500 animate-pulse' : 'text-emerald-400'}`}>
-              {timeLeft}
-            </div>
-          </div>
-
-          <div className="relative">
-            <div className="absolute bg-yellow-500/10 blur-[100px] rounded-full" style={{ inset: '-10%' }}></div>
-
-            <PlayerCard
-              player={MOCK_PLAYER}
-              currentBid={currentBid}
-              highestBidder={highestBidderLabel}
-            />
-
-            {auctionStatus === 'sold' && (
-              <div className="absolute inset-0 flex items-center justify-center z-50 pointer-events-none">
-                <div style={{ transform: 'rotate(-12deg)' }}>
-                  <div className="bg-red-600/90 text-white text-6xl font-black uppercase tracking-widest py-4 px-8 border-8 border-white rounded-3xl drop-shadow-2xl backdrop-blur-sm animate-bounce">
-                    SATILDI
-                  </div>
+          {cur ? (
+            <>
+              <div className={`mb-2 flex flex-col items-center transition-transform duration-300 ${isDangerZone ? 'scale-125' : 'scale-100'}`}>
+                <span className="text-slate-400 font-bold uppercase tracking-widest text-xs mb-1">
+                  İhale {cur.sequenceNo}/{state.total} · Kalan Süre
+                </span>
+                <div className={`text-6xl font-black drop-shadow-lg ${isDangerZone ? 'text-red-500 animate-pulse' : 'text-emerald-400'}`}>
+                  {bidding ? secondsLeft ?? '-' : 0}
                 </div>
               </div>
-            )}
-          </div>
+
+              <div className="relative">
+                <div className="absolute bg-yellow-500/10 blur-[100px] rounded-full" style={{ inset: '-10%' }}></div>
+
+                <PlayerCard
+                  card={cur.card}
+                  tier={cur.tier}
+                  currentBid={currentBid}
+                  leaderLabel={leaderLabel}
+                />
+
+                {cur.status !== 'bidding' && (
+                  <div className="absolute inset-0 flex items-center justify-center z-50 pointer-events-none">
+                    <div style={{ transform: 'rotate(-12deg)' }} className="flex flex-col items-center">
+                      <div className={`${cur.status === 'sold' ? 'bg-red-600/90' : 'bg-slate-600/90'} text-white text-6xl font-black uppercase tracking-widest py-4 px-8 border-8 border-white rounded-3xl drop-shadow-2xl backdrop-blur-sm animate-bounce`}>
+                        {cur.status === 'sold' ? 'SATILDI' : 'SATILMADI'}
+                      </div>
+                      {cur.status === 'sold' && (
+                        <div className="mt-3 bg-slate-900/90 px-4 py-1 rounded-xl text-lg font-black text-yellow-400">
+                          {nameOf(cur.winnerRoomPlayerId)} · {cur.price}M €
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </>
+          ) : (
+            <div className="flex flex-col items-center gap-4">
+              <div className="w-12 h-12 border-4 border-emerald-500 border-t-transparent rounded-full animate-spin"></div>
+              <p className="text-slate-300 font-black uppercase tracking-widest">İlk ihale birazdan başlıyor</p>
+            </div>
+          )}
         </FitToHeight>
       </div>
 
@@ -183,7 +213,7 @@ export default function DraftArena({
       <OpponentPanel
         side="left"
         player={leftOpp}
-        isBidding={highestBidder === leftOpp.id}
+        isBidding={bidding && cur.leaderRoomPlayerId === leftOpp.id}
         currentBid={currentBid}
         message={messages[leftOpp.id]}
         open={openPanel === PANEL.squad(leftOpp.id)}
@@ -193,7 +223,7 @@ export default function DraftArena({
       <OpponentPanel
         side="right"
         player={rightOpp}
-        isBidding={highestBidder === rightOpp.id}
+        isBidding={bidding && cur.leaderRoomPlayerId === rightOpp.id}
         currentBid={currentBid}
         message={messages[rightOpp.id]}
         open={openPanel === PANEL.squad(rightOpp.id)}
@@ -213,9 +243,9 @@ export default function DraftArena({
       <BottomBar
         me={me}
         currentBid={currentBid}
-        auctionStatus={auctionStatus}
-        isPassed={isPassed}
-        amIWinning={highestBidder === myId}
+        idleText={idleText}
+        lockedText={lockedText}
+        amIWinning={amIWinning}
         message={messages[myId]}
         squadOpen={openPanel === PANEL.squad(myId)}
         onToggleSquad={() => togglePanel(PANEL.squad(myId))}
@@ -249,10 +279,21 @@ export default function DraftArena({
         open={openPanel === PANEL.ALL_SQUADS}
         onClose={closePanel}
         myId={myId}
-        timeLeft={timeLeft}
+        timeLeft={bidding ? secondsLeft ?? 0 : 0}
         currentBid={currentBid}
         participants={[leftOpp, me, rightOpp]}
       />
+
+      {/* 8. UYARI (teklif reddedildi vb.) */}
+      {state.toast && (
+        <div
+          key={state.toast.id}
+          className="absolute left-1/2 -translate-x-1/2 z-50 bg-red-950/90 border border-red-500/60 text-red-100 px-6 py-3 rounded-2xl font-bold shadow-xl animate-fade-in"
+          style={{ bottom: BOTTOM_BAR_HEIGHT + 20 }}
+        >
+          ⚠️ {state.toast.text}
+        </div>
+      )}
     </div>
   );
 }

@@ -4,19 +4,17 @@ import { BID_STEPS, BOTTOM_BAR_HEIGHT, BUBBLE_MS } from '../../constants/draft';
 const BID_BUTTON_CLASS =
   "px-8 py-4 rounded-2xl bg-slate-800 text-white hover:bg-emerald-600 font-black text-2xl border border-slate-700 transition-all hover:scale-105 active:scale-95 shadow-lg disabled:opacity-50 disabled:hover:scale-100 disabled:hover:bg-slate-800";
 
-// Müzayede sürerken sağdaki butonlar: pas geçtin / teklif sende / teklif ver
-function BidActions({ budget, currentBid, isPassed, amIWinning, onBid, onPass }) {
-  if (isPassed) {
-    return (
-      <div className="px-12 py-4 rounded-2xl bg-slate-800 text-slate-500 font-black text-xl tracking-widest uppercase border border-slate-700">
-        PAS GEÇTİN
-      </div>
-    );
+const PILL_CLASS = "px-12 py-4 rounded-2xl font-black text-xl tracking-widest uppercase border";
+
+// Müzayede sürerken sağdaki butonlar: kilitli (pas geçtin / mevki dolu) / teklif sende / teklif ver
+function BidActions({ budget, currentBid, lockedText, amIWinning, onBid, onPass }) {
+  if (lockedText) {
+    return <div className={`${PILL_CLASS} bg-slate-800 text-slate-500 border-slate-700`}>{lockedText}</div>;
   }
 
   if (amIWinning) {
     return (
-      <div className="px-12 py-4 rounded-2xl bg-emerald-900/40 text-emerald-500 font-black text-xl tracking-widest uppercase border border-emerald-800/50 flex items-center gap-3">
+      <div className={`${PILL_CLASS} bg-emerald-900/40 text-emerald-500 border-emerald-800/50 flex items-center gap-3`}>
         <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7"></path></svg>
         EN YÜKSEK TEKLİF SENDE
       </div>
@@ -43,11 +41,12 @@ function BidActions({ budget, currentBid, isPassed, amIWinning, onBid, onPass })
   );
 }
 
+// idleText: aktif ihale yokken sağda görünen yazı (ör. "İHALE SONUÇLANDI"). Boşsa teklif butonları görünür.
 export default function BottomBar({
   me,
   currentBid,
-  auctionStatus,
-  isPassed,
+  idleText,
+  lockedText,
   amIWinning,
   message,
   squadOpen,
@@ -88,20 +87,20 @@ export default function BottomBar({
         </div>
       </div>
 
-      {auctionStatus === 'bidding' ? (
+      {idleText ? (
+        <div className={`${PILL_CLASS} bg-slate-800 text-yellow-500 border-slate-700 animate-fade-in`}>
+          {idleText}
+        </div>
+      ) : (
         <div className="flex gap-4">
           <BidActions
             budget={me.budget}
             currentBid={currentBid}
-            isPassed={isPassed}
+            lockedText={lockedText}
             amIWinning={amIWinning}
             onBid={onBid}
             onPass={onPass}
           />
-        </div>
-      ) : (
-        <div className="px-12 py-4 rounded-2xl bg-slate-800 text-yellow-500 font-black text-xl tracking-widest uppercase border border-slate-700 animate-fade-in">
-          İHALE SONUÇLANDI
         </div>
       )}
     </div>

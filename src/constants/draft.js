@@ -2,8 +2,7 @@
 // Orta sahne, yan paneller ve kadro paneli buna göre hizalanır.
 export const BOTTOM_BAR_HEIGHT = 128;
 
-// Müzayede
-export const ROUND_TIME = 15;
+// Müzayede. Süreyi sunucu yönetir (son tekliften 10 sn sonra kapanır), burada süre sabiti yok.
 export const BID_STEPS = [1, 5, 10];
 
 // Sohbet
@@ -16,8 +15,8 @@ export const QUICK_REPLIES = [
 ];
 export const BUBBLE_MS = 3500; // konuşma balonunun ekranda kalma süresi
 
-// Geliştirme sırasında rakipler rastgele mesaj atar. Canlıda otomatik kapanır.
-export const DEMO_BOTS = import.meta.env.DEV;
+// Rakiplerin rastgele mesaj atması (sadece tasarım denemesi içindi). Gerçek oyunda kapalı.
+export const DEMO_BOTS = false;
 
 // Animasyon
 export const EASE = 'cubic-bezier(0.22, 1, 0.36, 1)';
@@ -33,7 +32,7 @@ export const CHAT_BTN = 48;
 export const CHAT_W = 256;
 export const CHAT_H = 280;
 
-// 4-3-3'e benzeyen saha dizilişi (yüzde olarak konum)
+// 4-3-3'e benzeyen saha dizilişi (yüzde olarak konum). id'ler backend'in slot adlarıyla aynı.
 export const FORMATION_POSITIONS = [
   { id: 'ST', top: '10%', left: '50%' },
   { id: 'LW', top: '25%', left: '20%' },
@@ -43,7 +42,7 @@ export const FORMATION_POSITIONS = [
   { id: 'CDM', top: '60%', left: '50%' },
   { id: 'LB', top: '70%', left: '15%' },
   { id: 'RB', top: '70%', left: '85%' },
-  { id: 'CB1', top: '80%', left: '35%' },
-  { id: 'CB2', top: '80%', left: '65%' },
+  { id: 'CB_1', top: '80%', left: '35%' },
+  { id: 'CB_2', top: '80%', left: '65%' },
   { id: 'GK', top: '90%', left: '50%' },
 ];
